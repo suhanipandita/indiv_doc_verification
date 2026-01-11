@@ -1,6 +1,8 @@
 from fastapi import FastAPI, File, UploadFile
 import shutil
 import os
+from ml_engine.detector import IDDetector
+from ml_engine.ocr import TextExtractor
 
 app = FastAPI(title="ID Verification API")
 
