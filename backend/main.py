@@ -9,27 +9,39 @@ app = FastAPI(title="ID Verification API")
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-@app.get("/")
-def home():
-    """
-    This is just a check to see if server is running.
-    """
-    return {"message": "Backend is running! implementation of PS-4."}
+# Initialize the models
+detector = IDDetector()
+extractor = TextExtractor()
 
 @app.post("/verify/")
 async def verify_document(file: UploadFile = File(...)):
-    """
-    The main function. The Frontend sends an image here.
-    For now, we just save it and confirm receipt.
-    """
-    
     file_location = f"{UPLOAD_FOLDER}/{file.filename}"
     
+    # 1. Save the file locally
     with open(file_location, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-        
+    
+    # 2. Run Detection (Member 1's Code)
+    detection_result = detector.detect_and_crop(file_location)
+    
+    # --- LOGGING TO CONSOLE ---
+    print(f"File: {file.filename} | Confidence: {detection_result.get('confidence', 0)}")
+    
+    if not detection_result["found"]:
+        return {
+            "status": "failed", 
+            "message": "No ID card found.",
+            "confidence": detection_result.get("confidence", 0)
+        }
+
+    # 3. Run OCR (Member 2's Code)
+    ocr_result = extractor.extract_details(file_location)
+
+    # 4. Return Full Response (including Confidence)
     return {
         "filename": file.filename,
-        "status": "File received successfully",
-        "message": "Sending this file to ML model for verification..." 
+        "verification_status": "Processing Complete",
+        "confidence_score": detection_result["confidence"],  # <--- ADDED THIS
+        "detected_box": detection_result["crop_coordinates"],
+        "extracted_info": ocr_result 
     }

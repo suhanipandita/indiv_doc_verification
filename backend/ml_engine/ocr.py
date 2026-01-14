@@ -12,7 +12,6 @@ class TextExtractor:
         print(f"[ML] Extracting text from {image_path}...")
 
         # MOCK LOGIC: Member 2 replace this with real OCR
-        # You can use the data from the PAN cards you uploaded as dummy data
         return {
             "name": "RAHUL MISHRA",  # Matching your pan1.png
             "dob": "30/01/1997",
