@@ -67,7 +67,7 @@ def run_verification(id_path, selfie_path):
         if score >= 0.75: 
             print("RESULT: FACE MATCHED - APPROVED")
         elif score >= 0.60:
-            print("RESULT: PARTIAL MATCH - MANUAL REVIEW")
+            print("RESULT: PARTIAL MATCH ")
         else:
             print("RESULT: FACE NOT MATCHED - REJECTED")
     else:
