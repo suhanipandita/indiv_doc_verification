@@ -2,10 +2,16 @@ import cv2
 import pytesseract
 import numpy as np
 import re
+import pytesseract
+import platform
+
+if platform.system() == "Darwin":  # macOS
+    pytesseract.pytesseract.tesseract_cmd = "/opt/homebrew/bin/tesseract"
+elif platform.system() == "Windows":
+    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 class OCREngine:
     def __init__(self):
-        pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
         # PSM 6 is ideal for ID cards as it preserves line-by-line structure
         self.config = r'--oem 3 --psm 6'
 

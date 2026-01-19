@@ -3,7 +3,7 @@ import os
 
 OUTPUT_PATH = "selfie_face.jpg"
 
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(1, cv2.CAP_AVFOUNDATION)
 
 if not cap.isOpened():
     print("Cannot access webcam")

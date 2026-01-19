@@ -14,8 +14,6 @@ from ocr_engine import OCREngine
 from skimage.metrics import structural_similarity as ssim
 import sys
 
-# --- 1. INITIALIZATION ---
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 mtcnn = MTCNN(keep_all=False, device=device, margin=20, post_process=True)
