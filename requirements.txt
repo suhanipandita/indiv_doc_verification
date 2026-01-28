@@ -1,0 +1,13 @@
+tesseract
+streamlit
+opencv-python
+numpy
+scikit-learn
+scikit-image
+torch
+torchvision
+facenet-pytorch
+easyocr
+pytesseract
+Pillow
+supabase

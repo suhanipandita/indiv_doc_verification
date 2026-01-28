@@ -1,6 +1,4 @@
 import streamlit as st
-import cv2
-import numpy as np
 import os
 import tempfile
 import difflib
@@ -9,15 +7,16 @@ from sklearn.metrics.pairwise import cosine_similarity
 # Import your existing backend logic
 import main as backend
 
+# Import the new utilities file
+import utils
+
 # Configure the page
 st.set_page_config(page_title="KYC Master Control System", layout="centered")
 
-# --- CUSTOM EMOJI ANIMATION FUNCTION ---
+# --- UI HELPER FUNCTIONS ---
+
 def emoji_rain(emoji_text, count=30, size=50):
-    """
-    Injects CSS/JS to make a specific emoji float up/down the screen
-    mimicking the st.balloons() effect.
-    """
+    """Injects CSS/JS for the floating emoji animation."""
     js_code = f"""
     <script>
     function createEmoji() {{
@@ -33,8 +32,6 @@ def emoji_rain(emoji_text, count=30, size=50):
         
         setTimeout(() => {{ document.body.removeChild(div); }}, 5000);
     }}
-
-    // Inject CSS for animation
     const style = document.createElement('style');
     style.innerHTML = `
     @keyframes floatUp {{
@@ -44,30 +41,17 @@ def emoji_rain(emoji_text, count=30, size=50):
     }}
     `;
     document.head.appendChild(style);
-
-    // Trigger multiple emojis
     for(let i=0; i<{count}; i++) {{
         setTimeout(createEmoji, Math.random() * 2000);
     }}
     </script>
     """
-    # Using streamlit components to inject script
     st.components.v1.html(js_code, height=0)
 
-st.title("═ KYC Master Control System ═")
-st.markdown("### Automated Document Verification & Biometric Matching")
-
-# Sidebar for Track Selection
-track = st.sidebar.radio(
-    "Select Verification Track:",
-    ("Track 1: Standard Employee (ID + PAN)", "Track 2: Startup Employee (Offer Letter + PAN)")
-)
-
 def save_uploaded_file(uploaded_file):
-    """Helper to save uploaded file to a temp path so cv2 can read it."""
+    """Helper to save uploaded file to a temp path."""
     if uploaded_file is not None:
         try:
-            # Create a temporary file with the correct extension
             suffix = "." + uploaded_file.name.split('.')[-1] if uploaded_file.name else ".jpg"
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
                 tmp_file.write(uploaded_file.getvalue())
@@ -77,114 +61,137 @@ def save_uploaded_file(uploaded_file):
             return None
     return None
 
+# --- MAIN APP LAYOUT ---
+
+st.title("═ KYC Master Control System ═")
+st.markdown("### Automated Document Verification & Biometric Matching")
+
+track = st.sidebar.radio(
+    "Select Verification Track:",
+    ("Track 1: Standard Employee (ID + PAN)", "Track 2: Startup Employee (Offer Letter + PAN)")
+)
+
 # --- TRACK 1 LOGIC ---
 if track == "Track 1: Standard Employee (ID + PAN)":
     st.header("Track 1: Standard Employee Verification")
     
-    # 1. Selfie Input (Vertical)
     st.subheader("1. Selfie")
     selfie_file = st.camera_input("Take a Live Selfie")
 
     st.divider()
 
-    # 2. ID Input (Vertical)
     st.subheader("2. Employee ID")
     id_file = st.file_uploader("Upload Employee ID Card", type=['jpg', 'jpeg', 'png'])
 
     st.divider()
 
-    # 3. PAN Input (Vertical)
-    st.subheader("3. PAN Card")
-    pan_file = st.file_uploader("Upload PAN Card", type=['jpg', 'jpeg', 'png'], key="pan1")
+    st.subheader("3. Verification Level")
+    use_pan = st.checkbox("Verify with PAN (Upgrade to Verified User)", value=False)
+    
+    pan_file = None
+    if use_pan:
+        st.info("ℹ️ Uploading PAN Card allows for Government ID verification.")
+        pan_file = st.file_uploader("Upload PAN Card", type=['jpg', 'jpeg', 'png'], key="pan1")
+    else:
+        st.write("Skipping PAN. You will be verified as a **Normal User**.")
 
     st.divider()
 
     if st.button("Run Verification", type="primary"):
-        if not selfie_file or not id_file or not pan_file:
-            st.warning("⚠️ Please provide all three documents (Selfie, ID, and PAN).")
+        if not selfie_file or not id_file:
+            st.warning("⚠️ Please provide Selfie and Employee ID.")
+        elif use_pan and not pan_file:
+            st.warning("⚠️ You selected PAN verification but didn't upload a PAN card.")
         else:
-            # Save files to temp paths for the backend to read
             selfie_path = save_uploaded_file(selfie_file)
             id_path = save_uploaded_file(id_file)
-            pan_path = save_uploaded_file(pan_file)
+            pan_path = save_uploaded_file(pan_file) if use_pan else None
 
             try:
                 with st.status("Processing Verification...", expanded=True) as status:
                     
-                    # --- STEP 1: ID PROCESSING ---
+                    # 1. ID Processing
                     status.write("🔹 Processing Employee ID...")
+                    # Using backend (main.py) OCR engine
                     cleaned_id = backend.ocr_engine.clean_image(id_path)
                     id_result = backend.ocr_engine.extract_universal_data(cleaned_id)
                     id_name = str(id_result.get("name", "NOT FOUND")).upper().strip()
                     st.write(f"**Extracted Name from ID:** `{id_name}`")
 
-                    # --- STEP 2: ID FACE MATCH ---
+                    # 2. Biometrics (Selfie vs ID)
                     status.write("🔹 Checking Biometrics (Selfie vs ID)...")
                     emb_s = backend.get_face_embedding(selfie_path)
                     emb_id = backend.get_face_embedding(id_path)
 
                     id_match_success = False
+                    current_score = 0.0
+
                     if emb_s is not None and emb_id is not None:
-                        score = cosine_similarity(emb_s, emb_id)[0][0]
-                        st.write(f"**ID Face Match Score:** `{score:.3f}`")
+                        current_score = cosine_similarity(emb_s, emb_id)[0][0]
+                        st.write(f"**ID Face Match Score:** `{current_score:.3f}`")
                         
-                        if score >= 0.70:
+                        if current_score >= 0.70:
                             st.success("✅ BIOMETRIC MATCH: APPROVED")
                             id_match_success = True
-                        elif score >= 0.50:
-                            st.warning("⚠️ BIOMETRIC MATCH: PROVISIONAL (Requires Name Verification)")
+                        elif current_score >= 0.50:
+                            st.warning("⚠️ BIOMETRIC MATCH: PROVISIONAL")
                             id_match_success = True
                         else:
                             st.error("❌ RESULT: FACE NOT MATCHED (ID Card)")
                     else:
                         st.error("❌ Error: Could not detect faces in Selfie or ID.")
 
-                    # Proceed only if ID match didn't fail hard
+                    # 3. Decision Logic
                     if id_match_success:
-                        # --- STEP 3: PAN PROCESSING ---
-                        status.write("🔹 Processing PAN Card...")
+                        # CASE A: NORMAL USER (NO PAN)
+                        if not use_pan:
+                            status.update(label="Verification Complete!", state="complete", expanded=False)
+                            emoji_rain("👍", count=20, size=60)
+                            st.markdown("# 👍 Access Granted")
+                            st.success(f"✅ User Status: **NORMAL USER**")
+                            # Log to DB using utils
+                            utils.log_to_db("Track 1", "NORMAL USER", id_name, None, current_score, "Skipped", "APPROVED")
                         
-                        # Authenticity Check
-                        if not backend.is_pan_real(pan_path):
-                            st.error("❌ REJECTED: Digital Screen/Tampering detected on PAN.")
+                        # CASE B: VERIFIED USER (WITH PAN)
                         else:
-                            st.success("✅ PAN Authenticity Verified.")
-                            
-                            # Name Extraction
-                            pan_name = str(backend.get_easyocr_pan_name(pan_path)).upper().strip()
-                            st.write(f"**Extracted Name from PAN:** `{pan_name}`")
-
-                            # Name Matching
-                            name_similarity = 0.0
-                            if id_name != "NOT FOUND" and pan_name != "NOT FOUND":
-                                name_similarity = difflib.SequenceMatcher(None, id_name, pan_name).ratio()
-                                st.write(f"**Name Similarity Score:** `{name_similarity:.2f}`")
-                            
-                            # --- STEP 4: FINAL BIOMETRIC (Selfie vs PAN) ---
-                            emb_p = backend.get_face_embedding(pan_path)
-                            
-                            if emb_s is not None and emb_p is not None:
-                                p_score = cosine_similarity(emb_s, emb_p)[0][0]
-                                st.write(f"**PAN Face Match Score:** `{p_score:.3f}`")
-                                
-                                if p_score >= 0.60 or (p_score >= 0.45 and name_similarity > 0.60):
-                                    status.update(label="Verification Complete!", state="complete", expanded=False)
-                                    st.success("✅ RESULT: FACE MATCHED")
-                                    if name_similarity > 0.55:
-                                        # TRIGGER THUMBS UP ANIMATION
-                                        emoji_rain("👍", count=40, size=60)
-                                        st.success("✅ RESULT: IDENTITY VERIFIED (TRACK 1 SUCCESSFUL)")
-                                    else:
-                                        st.error("❌ RESULT: NAME MISMATCH (Verification Failed)")
-                                else:
-                                    st.error(f"❌ RESULT: FACE NOT MATCHED (Score: {p_score:.2f})")
+                            status.write("🔹 Processing PAN Card...")
+                            if not backend.is_pan_real(pan_path):
+                                st.error("❌ REJECTED: Digital Screen/Tampering detected on PAN.")
+                                utils.log_to_db("Track 1", "FAILED", id_name, "FAKE_DOC", current_score, "Failed", "REJECTED")
                             else:
-                                st.error("❌ Error: Face detection failed on PAN.")
+                                st.success("✅ PAN Authenticity Verified.")
+                                
+                                # --- USE UTILS FOR ROBUST EXTRACTION ---
+                                extracted_pan = utils.extract_pan_number_robust(pan_path)
+                                extracted_pan_name = str(backend.get_easyocr_pan_name(pan_path)).upper().strip()
+                                
+                                st.write(f"**Name on PAN:** `{extracted_pan_name}`")
+                                st.write(f"**PAN Number:** `{extracted_pan}`")
+
+                                emb_p = backend.get_face_embedding(pan_path)
+                                if emb_s is not None and emb_p is not None:
+                                    p_score = cosine_similarity(emb_s, emb_p)[0][0]
+                                    st.write(f"**PAN Face Match Score:** `{p_score:.3f}`")
+                                    
+                                    if p_score >= 0.60:
+                                        status.update(label="Verification Complete!", state="complete", expanded=False)
+                                        emoji_rain("🌟", count=40, size=60)
+                                        st.markdown("# 🌟 Verified User")
+                                        st.success("✅ User Status: **VERIFIED USER**")
+                                        # Log to DB using utils
+                                        utils.log_to_db("Track 1", "VERIFIED USER", extracted_pan_name, extracted_pan, p_score, "Passed", "APPROVED")
+                                    else:
+                                        st.error(f"❌ RESULT: PAN Verification Failed")
+                                        utils.log_to_db("Track 1", "FAILED", extracted_pan_name, extracted_pan, p_score, "Passed", "REJECTED")
+                                else:
+                                    st.error("❌ Error: Face detection failed on PAN.")
+                    else:
+                        utils.log_to_db("Track 1", "FAILED", id_name, None, current_score, "Skipped", "REJECTED")
 
             except Exception as e:
-                st.error(f"An error occurred during processing: {e}")
+                st.error(f"An error occurred: {e}")
             finally:
-                # Cleanup temp files
+                # Cleanup
                 for p in [selfie_path, id_path, pan_path]:
                     if p and os.path.exists(p): os.remove(p)
 
@@ -192,111 +199,133 @@ if track == "Track 1: Standard Employee (ID + PAN)":
 elif track == "Track 2: Startup Employee (Offer Letter + PAN)":
     st.header("Track 2: Startup Employee Verification")
 
-    # 1. Selfie Input (Vertical)
     st.subheader("1. Selfie")
     selfie_file = st.camera_input("Take a Live Selfie")
 
     st.divider()
 
-    # 2. Offer Letter Input (Vertical)
     st.subheader("2. Offer Letter")
     offer_file = st.file_uploader("Upload Offer Letter", type=['jpg', 'jpeg', 'png'])
 
     st.divider()
 
-    # 3. PAN Input (Vertical)
-    st.subheader("3. PAN Card")
-    pan_file = st.file_uploader("Upload PAN Card", type=['jpg', 'jpeg', 'png'], key="pan2")
+    st.subheader("3. Verification Level")
+    use_pan = st.checkbox("Verify with PAN (Upgrade to Verified User)", value=False)
+
+    pan_file = None
+    if use_pan:
+        st.info("ℹ️ Uploading PAN Card allows for biometric verification.")
+        pan_file = st.file_uploader("Upload PAN Card", type=['jpg', 'jpeg', 'png'], key="pan2")
+    else:
+        st.write("Skipping PAN. You will be verified as a **Normal User**.")
 
     st.divider()
 
     if st.button("Run Verification", type="primary"):
-        if not selfie_file or not offer_file or not pan_file:
-            st.warning("⚠️ Please provide all three documents.")
+        if not selfie_file or not offer_file:
+            st.warning("⚠️ Please provide Selfie and Offer Letter.")
+        elif use_pan and not pan_file:
+            st.warning("⚠️ You selected PAN verification but didn't upload a PAN card.")
         else:
             selfie_path = save_uploaded_file(selfie_file)
             offer_path = save_uploaded_file(offer_file)
-            pan_path = save_uploaded_file(pan_file)
+            pan_path = save_uploaded_file(pan_file) if use_pan else None
             
             try:
                 with st.status("Processing Verification...", expanded=True) as status:
-                    # --- STEP 1: FORENSIC AUDIT (Stamp/Signature) ---
-                    status.write("🔹 Performing Forensic Audit (Stamp & Signature)...")
+                    # 1. Forensic Audit
+                    status.write("🔹 Performing Forensic Audit...")
+                    # Using opencv directly here or backend helper? 
+                    # The previous logic used backend.check_forensic_authenticity 
+                    # but required reading the image first. Keeping inline OpenCV for cropping as per original logic.
+                    import cv2
                     img = cv2.imread(offer_path)
                     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+                    mask = cv2.inRange(hsv, (100, 50, 50), (140, 255, 255)) # using tuple for scalars works with cv2 wrapper or numpy array
+                    import numpy as np
+                    # Redefining mask with numpy as typically required by cv2
                     mask = cv2.inRange(hsv, np.array([100, 50, 50]), np.array([140, 255, 255]))
-                    
+
                     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                     
                     stamp_verified = False
+                    forensics = {'color_variance': 0, 'ssim_score': 0}
+
                     if contours:
                         best_cnt = max(contours, key=cv2.contourArea)
                         x, y, w, h = cv2.boundingRect(best_cnt)
                         stamp_crop = img[y:y+h, x:x+w]
                         
-                        # Note: This requires the template file to exist as per original project
                         template_path = "templates/maketechberry_seal.png"
-                        
                         forensics = backend.check_forensic_authenticity(stamp_crop, template_path)
                         st.write(f"**Forensics Stats:** Color Var: `{forensics['color_variance']:.2f}`, SSIM: `{forensics['ssim_score']:.2f}`")
                         
-                        if forensics['color_variance'] < 5.0:
-                            st.error("❌ REJECTED: Digital forgery suspected (Flat color profile).")
-                        elif forensics['ssim_score'] < 0.50:
-                            st.error("❌ REJECTED: Stamp geometry mismatch.")
+                        if forensics['color_variance'] < 5.0 or forensics['ssim_score'] < 0.50:
+                            st.error("❌ REJECTED: Forensic Audit Failed.")
+                            utils.log_to_db("Track 2", "FAILED", "Unknown", None, 0.0, "Failed", "REJECTED")
                         else:
                             st.success("✅ Stamp Authenticity Verified.")
                             stamp_verified = True
                     else:
-                        st.error("❌ REJECTED: No physical ink/stamp detected on document.")
+                        st.error("❌ REJECTED: No physical ink/stamp detected.")
+                        utils.log_to_db("Track 2", "FAILED", "Unknown", None, 0.0, "Missing Stamp", "REJECTED")
 
                     if stamp_verified:
-                        # --- STEP 2: TEXT EXTRACTION ---
-                        status.write("🔹 Analyzing Offer Letter Text...")
+                        # 2. Extract Name
+                        status.write("🔹 Analyzing Text...")
                         reader = backend.easyocr.Reader(['en'])
                         results = reader.readtext(offer_path)
                         lines = [res[1].upper() for res in results]
-                        
                         candidate_name = "NOT FOUND"
                         for i, line in enumerate(lines):
                             if "TO" in line and i + 1 < len(lines):
                                 candidate_name = lines[i+1].strip()
                                 break
-                        st.write(f"**Name on Offer Letter:** `{candidate_name}`")
+                        st.write(f"**Name on Document:** `{candidate_name}`")
 
-                        # --- STEP 3: PAN & NAME MATCH ---
-                        status.write("🔹 Cross-referencing with PAN Card...")
-                        pan_name = str(backend.get_easyocr_pan_name(pan_path))
-                        st.write(f"**Name on PAN:** `{pan_name}`")
-                        
-                        name_sim = difflib.SequenceMatcher(None, candidate_name, pan_name).ratio()
-                        st.write(f"**Document Name Similarity:** `{name_sim:.2f}`")
+                        # CASE A: NORMAL USER
+                        if not use_pan:
+                            status.update(label="Verification Complete!", state="complete", expanded=False)
+                            emoji_rain("👍", count=20, size=60)
+                            st.markdown("# 👍 Access Granted")
+                            st.success(f"✅ User Status: **NORMAL USER**")
+                            utils.log_to_db("Track 2", "NORMAL USER", candidate_name, None, 0.0, "Passed", "APPROVED")
 
-                        # --- STEP 4: BIOMETRIC MATCH ---
-                        emb_s = backend.get_face_embedding(selfie_path)
-                        emb_p = backend.get_face_embedding(pan_path)
-
-                        if emb_s is not None and emb_p is not None:
-                            p_score = cosine_similarity(emb_s, emb_p)[0][0]
-                            st.write(f"**Face Match Score:** `{p_score:.3f}`")
-                            
-                            if p_score >= 0.45 and name_sim > 0.65:
-                                status.update(label="Verification Complete!", state="complete", expanded=False)
-                                # TRIGGER THUMBS UP ANIMATION
-                                emoji_rain("👍", count=40, size=60)
-                                st.success("✅ RESULT: IDENTITY & EMPLOYMENT VERIFIED (TRACK 2 SUCCESSFUL)")
-                            else:
-                                st.error(f"❌ RESULT: Verification Failed (Biometric: {p_score:.2f}, Name Match: {name_sim:.2f})")
+                        # CASE B: VERIFIED USER
                         else:
-                            st.error("❌ Error: Biometric capture failed (Face not detected).")
+                            status.write("🔹 Cross-referencing with PAN...")
+                            
+                            extracted_pan = utils.extract_pan_number_robust(pan_path)
+                            extracted_pan_name = str(backend.get_easyocr_pan_name(pan_path)).upper().strip()
+                            
+                            st.write(f"**Name on PAN:** `{extracted_pan_name}`")
+                            st.write(f"**PAN Number:** `{extracted_pan}`")
+
+                            emb_s = backend.get_face_embedding(selfie_path)
+                            emb_p = backend.get_face_embedding(pan_path)
+
+                            if emb_s is not None and emb_p is not None:
+                                p_score = cosine_similarity(emb_s, emb_p)[0][0]
+                                st.write(f"**Face Match Score:** `{p_score:.3f}`")
+                                
+                                if p_score >= 0.45:
+                                    status.update(label="Verification Complete!", state="complete", expanded=False)
+                                    emoji_rain("🌟", count=40, size=60)
+                                    st.markdown("# 🌟 Verified User")
+                                    st.success("✅ User Status: **VERIFIED USER**")
+                                    utils.log_to_db("Track 2", "VERIFIED USER", extracted_pan_name, extracted_pan, p_score, "Passed", "APPROVED")
+                                else:
+                                    st.error(f"❌ RESULT: Verification Failed")
+                                    utils.log_to_db("Track 2", "FAILED", extracted_pan_name, extracted_pan, p_score, "Passed", "REJECTED")
+                            else:
+                                st.error("❌ Error: Biometric capture failed.")
 
             except Exception as e:
                 st.error(f"An error occurred: {e}")
             finally:
-                # Cleanup
                 for p in [selfie_path, offer_path, pan_path]:
                     if p and os.path.exists(p): os.remove(p)
 
 # Footer
 st.markdown("---")
-st.caption("KYC System v1.4 | Powered by Streamlit & PyTorch")
+st.caption("KYC System v2.3 | Powered by Streamlit & PyTorch")
